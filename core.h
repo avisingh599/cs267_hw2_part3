@@ -25,7 +25,7 @@ class Box
 {
     public:
         std::set<int> particles;
-        omp_lock_t* lock;
+        int* lock;
 };
 void put_particle_in_boxes(
     boxed_particle_t* boxed_particle,
