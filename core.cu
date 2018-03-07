@@ -92,55 +92,142 @@ int get_max_nsquares_per_side() {
 }
 
 int get_box_index(
-    boxed_particle_t* boxed_particle,
+    particle_t* particle,
     double box_width,
     int nsquares_per_side
 ) {
-    int row = floor(boxed_particle->p->y/box_width);
-    int col = floor(boxed_particle->p->x/box_width);
+    int row = floor(particle->y/box_width);
+    int col = floor(particle->x/box_width);
     return col + row*nsquares_per_side;
 }
 
-
-void put_particle_in_boxes(
-    boxed_particle_t* boxed_particle,
-    int p_idx,
-    Box** boxes,
+void put_particle_in_box_1(
+    particle_t* particles,
+    int pidx,
+    int* box_positions,
     double box_width,
-    int nsquares_per_side,
-    int n
+    int nsquares_per_side
 ) {
-    int flag = 0;
-    int box_index = get_box_index(
-        boxed_particle,
-        box_width,
-        nsquares_per_side
-    );
-    boxed_particle->box_index = box_index;
-    boxes[box_index]->particles.insert(p_idx);
+    particle_t *particle = particles + pidx;
+    int box_index = get_box_index(particle,box_width,nsquares_per_side);
+    box_positions[box_index+1] +=1;
 }
 
 
-void update_particle_in_boxes(
-    boxed_particle_t* boxed_particle,
-    int p_idx,
-    Box** boxes,
+void put_particle_in_box_2(
+    particle_t* particles,
+    int pidx,
+    int* box_positions,
+    int* box_iterators,
+    int* box_indices,
+    int* particle_indices_boxed,
     double box_width,
-    int nsquares_per_side,
-    int n
+    int nsquares_per_side
 ) {
-    int new_box_index = get_box_index(
-        boxed_particle,
-        box_width,
-        nsquares_per_side
-    );
-    int old_box_index = boxed_particle->box_index;
-    if (new_box_index != old_box_index) {
-        boxes[old_box_index]->particles.erase(p_idx);
-        boxes[new_box_index]->particles.insert(p_idx);
-//        boxed_particle->next_box_index = new_box_index;
-        boxed_particle->box_index = new_box_index;
-        boxed_particle->moved_boxes = 1;
-    }
+
+    particle_t *particle = particles + pidx;
+    int box_index = get_box_index(particle,box_width,nsquares_per_side);
+    
+    int store_idx = box_positions[box_index] + box_iterators[box_index]; 
+    box_iterators[box_index] += 1; 
+
+    box_indices[pidx] = box_index; 
+    particle_indices_boxed[store_idx] = pidx; 
+    //box_sizes[box_index] +=1
 }
+
+// void put_particle_in_box_1(
+//     boxed_particle_t* boxed_particles,
+//     int pidx,
+//     int* box_positions,
+//     double box_width,
+//     int nsquares_per_side
+// ) {
+//     boxed_particle_t *boxed_particle = boxed_particles + pidx;
+//     int box_index = get_box_index(boxed_particle,box_width,nsquares_per_side);
+//     box_positions[box_index+1] +=1
+// }
+
+
+// void put_particle_in_box_2(
+//     boxed_particle_t* boxed_particles_read,
+//     boxed_particle_t* boxed_particles_write,
+//     int pidx,
+//     int* box_positions,
+//     int* box_iterators,
+//     double box_width,
+//     int nsquares_per_side
+// ) {
+
+//     boxed_particle_t *boxed_particle = boxed_particles + pidx
+//     int box_index = get_box_index(boxed_particle,box_width,nsquares_per_side);
+    
+//     store_idx = box_positions[box_index] + box_iterators[box_index]; 
+//     box_iterators[box_index] += 1; 
+
+//     boxed_particles_write[store_idx].p = boxed_particle.p;
+//     boxed_particles_write[store_idx].box_index = box_index;
+
+//     //box_sizes[box_index] +=1
+// }
+
+
+// void put_particles_in_boxes(
+//     boxed_particle_t* boxed_particle,
+//     int* box_positions,
+//     int* box_sizes,
+//     double box_width,
+//     int nsquares_per_side,
+//     int n
+// ) {
+//     //int flag = 0;
+    
+//     int nsquares = nsquares_per_side*nsquares_per_side
+//     for (int i=0; i<nsquares; i++) {
+//         box_sizes[i] = 0;
+//     }
+
+//     boxed_particle_local     
+
+//     for (int i=0; i<n; i++) {
+//         int box_index = get_box_index(boxed_particle,box_width,nsquares_per_side);
+//         box_sizes[box_index] += 1
+//     }
+
+//     box_positions[0] = 0
+//     for (int i=1; i<nsquares; i++)  {
+//         box_positions[i] = box_sizes[i-1];
+//     }
+
+//     for (int i=0; i<n; i++) {
+//         int box_index = get_box_index(boxed_particle,box_width,nsquares_per_side);
+//         box_sizes[box_index] += 1
+//     }
+
+//     boxed_particle->box_index = box_index;
+//     //boxes[box_index]->particles.insert(p_idx);
+// }
+
+
+// void update_particle_in_boxes(
+//     boxed_particle_t* boxed_particle,
+//     int p_idx,
+//     double box_width,
+//     int nsquares_per_side,
+//     int n
+// ) {
+//     int new_box_index = get_box_index(
+//         boxed_particle,
+//         box_width,
+//         nsquares_per_side
+//     );
+//     int old_box_index = boxed_particle->box_index;
+//     if (new_box_index != old_box_index) {
+//         boxes[old_box_index]->particles.erase(p_idx);
+//         boxes[new_box_index]->particles.insert(p_idx);
+// //        boxed_particle->next_box_index = new_box_index;
+//         boxed_particle->box_index = new_box_index;
+//         boxed_particle->moved_boxes = 1;
+//     }
+// }
 
