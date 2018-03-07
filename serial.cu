@@ -192,6 +192,36 @@ int main( int argc, char **argv )
             move( particles[i] );
 
 
+        for (int b_idx=0; b_idx < nsquares+1; ++b_idx)
+            box_positions[b_idx] = 0;
+
+        for (int b_idx=0; b_idx < nsquares; ++b_idx)
+            box_iterators[b_idx] = 0;
+
+        for (int p_idx = 0; p_idx < n; ++p_idx)
+            put_particle_in_box_1(
+                particles,
+                p_idx,
+                box_positions,
+                box_width,
+                nsquares_per_side
+                );
+
+        for (int b_idx=1; b_idx < nsquares+1; ++b_idx)
+            box_positions[b_idx] = box_positions[b_idx] + box_positions[b_idx-1];
+
+        for (int p_idx = 0; p_idx < n; ++p_idx)
+            put_particle_in_box_2(
+                particles,
+                p_idx,
+                box_positions,
+                box_iterators,
+                box_indices,
+                particle_indices_boxed,
+                box_width,
+                nsquares_per_side
+                );
+
         // Faster than doing put_particles_in_boxes since this can assume the
         // particles are already in a box.
         // for (int p_idx = 0; p_idx < n; ++p_idx){
