@@ -34,4 +34,4 @@ core.o: core.cu core.h
 	$(CC) -c $(CFLAGS) core.cu
 
 clean:
-	rm -f *.o $(TARGETS) *.stdout *.txt
+	rm -f *.o $(TARGETS) *.stdout
