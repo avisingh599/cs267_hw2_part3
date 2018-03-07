@@ -84,7 +84,7 @@ __global__ void compute_forces_grid_gpu(particle_t * particles,
                                         boxed_particle_t* boxed_particles,
                                         Box** boxes, 
                                         int* boxneighbors,
-                                        int n, 
+                                        int n
                                         )
 {
   // Get thread (particle) ID
@@ -261,7 +261,7 @@ int main( int argc, char **argv )
     cudaThreadSynchronize();
 
     Box** d_boxes; 
-    cudaMalloc((void **), &d_boxes, nsquares_per_side * nsquares_per_side * sizeof(Box));
+    cudaMalloc((void **) &d_boxes, nsquares_per_side * nsquares_per_side * sizeof(Box));
     cudaThreadSynchronize();
     cudaMemcpy(d_boxes, boxes, nsquares_per_side * nsquares_per_side * sizeof(Box), cudaMemcpyHostToDevice);
     cudaThreadSynchronize();

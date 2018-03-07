@@ -114,7 +114,7 @@ int get_box_index(
 }
 
 
-void put_particle_in_boxes(
+__device__ void put_particle_in_boxes(
     boxed_particle_t* boxed_particle,
     int p_idx,
     Box** boxes,
@@ -135,7 +135,7 @@ void put_particle_in_boxes(
 }
 
 
-void update_particle_in_boxes(
+__device__ void update_particle_in_boxes(
     boxed_particle_t* boxed_particle,
     int p_idx,
     Box** boxes,
