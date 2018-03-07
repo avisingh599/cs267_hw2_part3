@@ -25,6 +25,8 @@ gpu.o: gpu.cu common.h
 	$(CC) -c $(NVCCFLAGS) gpu.cu
 common.o: common.cu common.h
 	$(CC) -c $(CFLAGS) common.cu
+core.o: core.cu core.h
+	$(CC) -c $(CFLAGS) core.cu
 
 clean:
 	rm -f *.o $(TARGETS) *.stdout *.txt
