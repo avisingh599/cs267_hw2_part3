@@ -1,9 +1,14 @@
 # Load CUDA using the following command
 # module load cuda
 #
+# CC = nvcc
+# CFLAGS = -O3 -arch=compute_37 -code=sm_37
+# NVCCFLAGS = -O3 -arch=compute_37 -code=sm_37
+# LIBS = 
+
 CC = nvcc
-CFLAGS = -O3 -arch=compute_37 -code=sm_37
-NVCCFLAGS = -O3 -arch=compute_37 -code=sm_37
+CFLAGS = -O3
+NVCCFLAGS = -O3
 LIBS = 
 
 TARGETS = serial gpu autograder
