@@ -59,7 +59,7 @@ __global__ void compute_forces_grid_gpu(
         int* box_to_num_particles,
         int* boxneighbors,
         int nsquares_per_side,
-        int box_width,
+        double box_width,
         int n
 ) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -96,7 +96,7 @@ __global__ void rebin_particles(
         int* boxneighbors,
         int nsquares,
         int nsquares_per_side,
-        int box_width,
+        double box_width,
         int n
 ) {
     int box_i = threadIdx.x + blockIdx.x * blockDim.x;
@@ -320,6 +320,10 @@ int main( int argc, char **argv )
         //  move particles
         //
         move_gpu <<< n_blks_particles, NUM_THREADS >>> (d_particles, n, size);
+
+        //
+        //  rebin particles
+        //
         rebin_particles <<< n_blks_boxes, NUM_THREADS >>> (
             d_particles,
             d_box_to_particles,
