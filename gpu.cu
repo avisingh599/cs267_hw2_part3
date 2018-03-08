@@ -7,6 +7,7 @@
 #include "core.h"
 
 #define NUM_THREADS 256
+#define MAX_N_PARTS_PER_BOX 10
 
 extern double size;
 //
@@ -22,6 +23,16 @@ __device__ void cudaUnlock(int *lock)
 {                                                            
   atomicExch(lock, 0);                                                                              
 }
+
+inline int get_box_index_serial(
+     particle_t* particle,
+     double box_width,
+     int nsquares_per_side
+ ) {
+     int row = floor(particle->y/box_width);
+     int col = floor(particle->x/box_width);
+     return col + row*nsquares_per_side;
+ }
 
 __device__ int get_box_index(
     particle_t* particle,
@@ -87,123 +98,80 @@ __device__ void apply_force_gpu(particle_t &particle, particle_t &neighbor)
 
 }
 
-__global__ void set_box_positions_zero(int* box_positions, int nsquares)
-{
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  if(tid >= (nsquares+1)) return;
+__global__ void compute_forces_grid_gpu(
+        particle_t * particles,
+        int* box_to_particles,
+        int* box_to_num_particles,
+        int* boxneighbors,
+        int nsquares_per_side,
+        int box_width,
+        int n
+) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if(tid >= n) return;
 
-  box_positions[tid] = 0;
-}
+    particles[tid].ax = particles[tid].ay = 0;
+    int box_i = get_box_index(particles + tid, box_width, nsquares_per_side);
 
-__global__ void compute_box_positions(int* box_positions, int nsquares)
-{
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  if(tid >= (nsquares +1) || tid < 1) return;
-
-  box_positions[tid] = box_positions[tid] + box_positions[tid-1];
-}
-
-__global__ void set_box_iterators_zero(int* box_iterators, int nsquares)
-{
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  if(tid >= nsquares) return;
-
-  box_iterators[tid] = 0;
-}
-
-__global__ void put_particles_in_box_1_gpu(particle_t * particles,
-                                        int* box_positions,
-                                        double box_width,
-                                        int nsquares_per_side,                                         
-                                        int n)
-{
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  if(tid >= n) return;
-
-  put_particle_in_box_1(
-            particles,
-            tid,
-            box_positions,
-            box_width,
-            nsquares_per_side
-            );
-
-}
-
-__global__ void put_particles_in_box_2_gpu(particle_t * particles,
-                                        int* box_positions,
-                                        int* box_iterators,
-                                        int* box_indices,
-                                        int* particle_indices_boxed,
-                                        double box_width, 
-                                        int nsquares_per_side,                                         
-                                        int n)
-{
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  if(tid >= n) return;
-
-  put_particle_in_box_2(
-      particles,
-      tid,
-      box_positions,
-      box_iterators,
-      box_indices,
-      particle_indices_boxed,
-      box_width,
-      nsquares_per_side
-      );
-}
-
-__global__ void compute_forces_grid_gpu(particle_t * particles,
-                                        int* box_positions,                                         
-                                        int* boxneighbors,
-                                        int* particle_indices_boxed,
-                                        int* box_indices,
-                                        int n
-                                        )
-{
-
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  if(tid >= n) return;
-
-  particles[tid].ax = particles[tid].ay = 0;
-  int box_idx = box_indices[tid];
-
-  for (
-      int i_in_boxneighbors = box_idx * 9;
-      i_in_boxneighbors < (box_idx+1)*9;
-      i_in_boxneighbors++
-  ) {
-      int neighboring_box_i = boxneighbors[i_in_boxneighbors];
-      if (neighboring_box_i != -1) {
-
-          for (
-              int it = box_positions[neighboring_box_i];
-              it != box_positions[neighboring_box_i+1];
-              it++
-          ) {     
-              int idx_2 = particle_indices_boxed[it]; 
-                  apply_force_gpu(
-                      particles[tid],
-                      particles[idx_2]
-                  );
+    for (
+        int i_in_boxneighbors = box_i * 9;
+        i_in_boxneighbors < (box_i+1)*9;
+        i_in_boxneighbors++
+    ) {
+        int neighboring_box_i = boxneighbors[i_in_boxneighbors];
+        if (neighboring_box_i != -1) {
+            int num_neigh_parts = box_to_num_particles[neighboring_box_i];
+            for (int j = 0; j < num_neigh_parts; j++) {
+                int idx_2 = box_to_particles[MAX_N_PARTS_PER_BOX * neighboring_box_i + j]; 
+                apply_force_gpu(
+                    particles[tid],
+                    particles[idx_2]
+                );
             }
-          }
-      }
-
+        }
+    }
 }
 
-__global__ void compute_forces_gpu(particle_t * particles, int n)
-{
-  // Get thread (particle) ID
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  if(tid >= n) return;
-
-  particles[tid].ax = particles[tid].ay = 0;
-  for(int j = 0 ; j < n ; j++)
-    apply_force_gpu(particles[tid], particles[j]);
-
+__global__ void rebin_particles(
+        particle_t * particles,
+        int* box_to_particles,
+        int* box_to_num_particles,
+        int* box_to_particles_next,
+        int* box_to_num_particles_next,
+        int* boxneighbors,
+        int nsquares,
+        int nsquares_per_side,
+        int box_width,
+        int n
+) {
+    int box_i = threadIdx.x + blockIdx.x * blockDim.x;
+    if (box_i >= nsquares) return;
+    int new_num_parts = 0;
+    for (
+        int i_in_boxneighbors = box_i * 9;
+        i_in_boxneighbors < (box_i+1)*9;
+        i_in_boxneighbors++
+    ) {
+        int neighboring_box_i = boxneighbors[i_in_boxneighbors];
+        if (neighboring_box_i != -1) {
+            int num_parts_neighbor = box_to_num_particles[neighboring_box_i];
+            for (int j = 0; j < num_parts_neighbor; j++) {
+                int part_i = box_to_particles[MAX_N_PARTS_PER_BOX * neighboring_box_i + j];
+                int new_box_i = get_box_index(
+                     particles + part_i,
+                     box_width,
+                     nsquares_per_side
+                 );
+                if (new_box_i == box_i) {
+                    box_to_particles_next[MAX_N_PARTS_PER_BOX * box_i + new_num_parts] = part_i;
+                    new_num_parts++;
+                }
+            }
+        }
+    }
+    box_to_num_particles_next[box_i] = new_num_parts;
 }
+
 
 __global__ void move_gpu (particle_t * particles, int n, double size)
 {
@@ -275,45 +243,23 @@ int main( int argc, char **argv )
     int boxneighbors[nsquares*9];
     get_box_neighbors(nsquares, nsquares_per_side, boxneighbors);
 
-    int *box_indices = (int* ) malloc(n * sizeof(int)); 
-    int *box_to_particles_odd = (int* ) malloc(20 * nsquares * sizeof(int));
-    int *box_to_particles_even = (int* ) malloc(20 * nsquares * sizeof(int));
-    int *num_particles_in_box_odd = (int* ) malloc(nsquares * sizeof(int)); 
-    int *num_particles_in_box_even = (int* ) malloc(nsquares * sizeof(int)); 
-    int *particle_indices_boxed = (int* ) malloc(nsquares * sizeof(int)); 
-    int *box_iterators = (int* ) malloc(nsquares * sizeof(int)); 
-    int *box_positions = (int* ) malloc(nsquares * sizeof(int)); 
+    int *box_to_particles = (int* ) malloc(MAX_N_PARTS_PER_BOX * nsquares * sizeof(int));
+    int *box_to_num_particles = (int* ) malloc(nsquares * sizeof(int));
 
-
-    // for (int b_idx=0; b_idx < nsquares+1; ++b_idx)
-    //     box_positions[b_idx] = 0;
-
-    // for (int b_idx=0; b_idx < nsquares; ++b_idx)
-    //     box_iterators[b_idx] = 0;
-
-    // for (int p_idx = 0; p_idx < n; ++p_idx)
-    //     put_particle_in_box_1(
-    //         particles,
-    //         p_idx,
-    //         box_positions,
-    //         box_width,
-    //         nsquares_per_side
-    //         );
-
-    // for (int b_idx=1; b_idx < nsquares+1; ++b_idx)
-    //     box_positions[b_idx] = box_positions[b_idx] + box_positions[b_idx-1];
-
-    // for (int p_idx = 0; p_idx < n; ++p_idx)
-    //     put_particle_in_box_2(
-    //         particles,
-    //         p_idx,
-    //         box_positions,
-    //         box_iterators,
-    //         box_indices,
-    //         particle_indices_boxed,
-    //         box_width,
-    //         nsquares_per_side
-    //         );
+    // Initialize the data structures serially once.
+    for (int b_idx=0; b_idx < nsquares; b_idx++) {
+        box_to_num_particles[b_idx] = 0;
+    }
+    for (int p_idx = 0; p_idx < n; p_idx++) {
+        int box_i = get_box_index_serial(
+            particles + p_idx,
+            box_width,
+            nsquares_per_side
+        );
+        int n_parts = box_to_num_particles[box_i];
+        box_to_particles[MAX_N_PARTS_PER_BOX * box_i + n_parts] = p_idx;
+        box_to_num_particles[box_i]++;
+    }
 
     cudaThreadSynchronize();
     double copy_time = read_timer( );
@@ -323,7 +269,7 @@ int main( int argc, char **argv )
 
     cudaThreadSynchronize();
     copy_time = read_timer( ) - copy_time;
-    
+
     //
     //  simulate a number of time steps
     //
@@ -331,55 +277,106 @@ int main( int argc, char **argv )
     double simulation_time = read_timer( );
 
     //copy box-y stuff to CUDA memory 
-    int *d_box_indices;
-    int *d_particle_indices_boxed;
-    int *d_box_iterators;
-    int *d_box_positions; 
-    int* d_boxneighbors; 
+    int *d_box_to_particles_odd;
+    int *d_box_to_particles_even;
+    int *d_box_to_num_particles_odd;
+    int *d_box_to_num_particles_even;
+    int *d_boxneighbors;
 
-    cudaMalloc((void **) &d_box_indices, n * sizeof(int));
-    cudaMalloc((void **) &d_particle_indices_boxed, n * sizeof(int));
-    cudaMalloc((void **) &d_box_iterators, nsquares * sizeof(int));
-    cudaMalloc((void **) &d_box_positions, (nsquares+1) * sizeof(int));
+    int *d_box_to_particles;
+    int *d_box_to_num_particles;
+    int *d_box_to_particles_next;
+    int *d_box_to_num_particles_next;
+
+    cudaMalloc(
+        (void **) &d_box_to_particles_odd,
+        MAX_N_PARTS_PER_BOX * nsquares * sizeof(int)
+    );
+    cudaMalloc((void **) &d_box_to_num_particles_odd, nsquares * sizeof(int)
+    );
+    cudaMalloc(
+        (void **) &d_box_to_particles_even,
+        MAX_N_PARTS_PER_BOX * nsquares * sizeof(int)
+    );
+    cudaMalloc((void **) &d_box_to_num_particles_even, nsquares * sizeof(int));
     cudaMalloc((void **) &d_boxneighbors, (nsquares*9) * sizeof(int));
 
-    cudaMemcpy(d_box_indices, box_indices, n * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_particle_indices_boxed, particle_indices_boxed, n * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_box_iterators, box_iterators, nsquares * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_box_positions, box_positions, (nsquares+1) * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(
+        d_box_to_particles_odd,
+        box_to_particles,
+        MAX_N_PARTS_PER_BOX * nsquares * sizeof(int),
+        cudaMemcpyHostToDevice
+    );
+    cudaMemcpy(
+        d_box_to_num_particles_odd,
+        box_to_num_particles,
+        nsquares * sizeof(int),
+        cudaMemcpyHostToDevice
+    );
+    cudaMemcpy(
+        d_box_to_particles_even,
+        box_to_particles,
+        MAX_N_PARTS_PER_BOX * nsquares * sizeof(int),
+        cudaMemcpyHostToDevice
+    );
+    cudaMemcpy(
+        d_box_to_num_particles_even,
+        box_to_num_particles,
+        nsquares * sizeof(int),
+        cudaMemcpyHostToDevice
+    );
     cudaMemcpy(d_boxneighbors, boxneighbors, (nsquares*9) * sizeof(int), cudaMemcpyHostToDevice);
 
     cudaThreadSynchronize();
-    int blks_particles = (n + NUM_THREADS - 1) / NUM_THREADS;
-    int blks_boxes = (nsquares + 1 + NUM_THREADS - 1) / NUM_THREADS;
+    int n_blks_particles = (n + NUM_THREADS - 1) / NUM_THREADS;
+    int n_blks_boxes = (nsquares + NUM_THREADS - 1) / NUM_THREADS;
 
 
-    set_box_iterators_zero <<< blks_boxes, NUM_THREADS >>> (d_box_iterators, nsquares); 
-    set_box_positions_zero <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
-    put_particles_in_box_1_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, box_width, nsquares_per_side, n); 
-    compute_box_positions <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
-    put_particles_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, box_width, nsquares_per_side, n); 
     cudaThreadSynchronize();
 
     for( int step = 0; step < NSTEPS; step++ )
     {
+        if (step % 2 == 0) {
+            d_box_to_particles = d_box_to_particles_even;
+            d_box_to_num_particles = d_box_to_num_particles_even;
+            d_box_to_particles_next = d_box_to_particles_odd;
+            d_box_to_num_particles_next = d_box_to_num_particles_odd;
+        } else {
+            d_box_to_particles = d_box_to_particles_odd;
+            d_box_to_num_particles = d_box_to_num_particles_odd;
+            d_box_to_particles_next = d_box_to_particles_even;
+            d_box_to_num_particles_next = d_box_to_num_particles_even;
+        }
+
         //
         //  compute forces
         //
-
-	    //compute_forces_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, n);
-      compute_forces_grid_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_boxneighbors, d_particle_indices_boxed, d_box_indices, n);
+        compute_forces_grid_gpu <<< n_blks_particles, NUM_THREADS >>> (
+            d_particles,
+            d_box_to_particles,
+            d_box_to_num_particles,
+            d_boxneighbors,
+            nsquares_per_side,
+            box_width,
+            n
+        );
 
         //
         //  move particles
         //
-	    move_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, n, size);
-
-      set_box_iterators_zero <<< blks_boxes, NUM_THREADS >>> (d_box_iterators, nsquares); 
-      set_box_positions_zero <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
-      put_particles_in_box_1_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, box_width, nsquares_per_side, n); 
-      compute_box_positions <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
-      put_particles_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, box_width, nsquares_per_side, n); 
+        move_gpu <<< n_blks_particles, NUM_THREADS >>> (d_particles, n, size);
+        rebin_particles <<< n_blks_boxes, NUM_THREADS >>> (
+            d_particles,
+            d_box_to_particles,
+            d_box_to_num_particles,
+            d_box_to_particles_next,
+            d_box_to_num_particles_next,
+            d_boxneighbors,
+            nsquares,
+            nsquares_per_side,
+            box_width,
+            n
+        );
 
         //
         //  save if necessary
@@ -387,8 +384,10 @@ int main( int argc, char **argv )
         if( fsave && (step%SAVEFREQ) == 0 ) {
 	    // Copy the particles back to the CPU
             cudaMemcpy(particles, d_particles, n * sizeof(particle_t), cudaMemcpyDeviceToHost);
+            for (int i = 0; i<n; i++)
+                printf("forces of %d: (%f, %f)", i, particles[i].ax, particles[i].ay);
             save( fsave, n, particles);
-	}
+        }
     }
     cudaThreadSynchronize();
     simulation_time = read_timer( ) - simulation_time;
@@ -397,7 +396,14 @@ int main( int argc, char **argv )
     printf( "n = %d, simulation time = %g seconds\n", n, simulation_time );
     
     free( particles );
+    free(box_to_particles);
+    free(box_to_num_particles);
     cudaFree(d_particles);
+    cudaFree(d_box_to_particles_odd);
+    cudaFree(d_box_to_particles_even);
+    cudaFree(d_box_to_num_particles_odd);
+    cudaFree(d_box_to_num_particles_even);
+    cudaFree(d_boxneighbors);
     if( fsave )
         fclose( fsave );
     
