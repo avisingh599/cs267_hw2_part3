@@ -44,40 +44,6 @@ __device__ int get_box_index(
     return col + row*nsquares_per_side;
 }
 
-__device__ void put_particle_in_box_1(
-    particle_t* particles,
-    int pidx,
-    int* box_positions,
-    double box_width,
-    int nsquares_per_side
-) {
-    particle_t *particle = particles + pidx;
-    int box_index = get_box_index(particle,box_width,nsquares_per_side);
-    box_positions[box_index+1] +=1;
-}
-
-
-__device__ void put_particle_in_box_2(
-    particle_t* particles,
-    int pidx,
-    int* box_positions,
-    int* box_iterators,
-    int* box_indices,
-    int* particle_indices_boxed,
-    double box_width,
-    int nsquares_per_side
-) {
-
-    particle_t *particle = particles + pidx;
-    int box_index = get_box_index(particle,box_width,nsquares_per_side);
-    
-    int store_idx = box_positions[box_index] + box_iterators[box_index]; 
-    box_iterators[box_index] += 1; 
-
-    box_indices[pidx] = box_index; 
-    particle_indices_boxed[store_idx] = pidx; 
-}
-
 __device__ void apply_force_gpu(particle_t &particle, particle_t &neighbor)
 {
   double dx = neighbor.x - particle.x;
@@ -121,8 +87,12 @@ __global__ void compute_forces_grid_gpu(
         int neighboring_box_i = boxneighbors[i_in_boxneighbors];
         if (neighboring_box_i != -1) {
             int num_neigh_parts = box_to_num_particles[neighboring_box_i];
+            // TODO: undo
+            /*particles[tid].ay = -1.;*/
             for (int j = 0; j < num_neigh_parts; j++) {
                 int idx_2 = box_to_particles[MAX_N_PARTS_PER_BOX * neighboring_box_i + j]; 
+        // TODO: undo
+                /*particles[tid].ax = 1.;*/
                 apply_force_gpu(
                     particles[tid],
                     particles[idx_2]
@@ -382,10 +352,7 @@ int main( int argc, char **argv )
         //  save if necessary
         //
         if( fsave && (step%SAVEFREQ) == 0 ) {
-	    // Copy the particles back to the CPU
             cudaMemcpy(particles, d_particles, n * sizeof(particle_t), cudaMemcpyDeviceToHost);
-            for (int i = 0; i<n; i++)
-                printf("forces of %d: (%f, %f)", i, particles[i].ax, particles[i].ay);
             save( fsave, n, particles);
         }
     }
