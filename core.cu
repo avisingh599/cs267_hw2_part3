@@ -7,7 +7,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include "common.h"
-#include "core.h"
+#include "core.cuh"
 
 //#include "core_openmp.h"
 
@@ -91,46 +91,46 @@ int get_max_nsquares_per_side() {
     return floor(size / cutoff);
 }
 
-int get_box_index(
-    particle_t* particle,
-    double box_width,
-    int nsquares_per_side
-) {
-    int row = floor(particle->y/box_width);
-    int col = floor(particle->x/box_width);
-    return col + row*nsquares_per_side;
-}
+// __device__ int get_box_index(
+//     particle_t* particle,
+//     double box_width,
+//     int nsquares_per_side
+// ) {
+//     int row = floor(particle->y/box_width);
+//     int col = floor(particle->x/box_width);
+//     return col + row*nsquares_per_side;
+// }
 
-void put_particle_in_box_1(
-    particle_t* particles,
-    int pidx,
-    int* box_positions,
-    double box_width,
-    int nsquares_per_side
-) {
-    particle_t *particle = particles + pidx;
-    int box_index = get_box_index(particle,box_width,nsquares_per_side);
-    box_positions[box_index+1] +=1;
-}
+// __device__ void put_particle_in_box_1(
+//     particle_t* particles,
+//     int pidx,
+//     int* box_positions,
+//     double box_width,
+//     int nsquares_per_side
+// ) {
+//     particle_t *particle = particles + pidx;
+//     int box_index = get_box_index(particle,box_width,nsquares_per_side);
+//     box_positions[box_index+1] +=1;
+// }
 
 
-void put_particle_in_box_2(
-    particle_t* particles,
-    int pidx,
-    int* box_positions,
-    int* box_iterators,
-    int* box_indices,
-    int* particle_indices_boxed,
-    double box_width,
-    int nsquares_per_side
-) {
+// __device__ void put_particle_in_box_2(
+//     particle_t* particles,
+//     int pidx,
+//     int* box_positions,
+//     int* box_iterators,
+//     int* box_indices,
+//     int* particle_indices_boxed,
+//     double box_width,
+//     int nsquares_per_side
+// ) {
 
-    particle_t *particle = particles + pidx;
-    int box_index = get_box_index(particle,box_width,nsquares_per_side);
+//     particle_t *particle = particles + pidx;
+//     int box_index = get_box_index(particle,box_width,nsquares_per_side);
     
-    int store_idx = box_positions[box_index] + box_iterators[box_index]; 
-    box_iterators[box_index] += 1; 
+//     int store_idx = box_positions[box_index] + box_iterators[box_index]; 
+//     box_iterators[box_index] += 1; 
 
-    box_indices[pidx] = box_index; 
-    particle_indices_boxed[store_idx] = pidx; 
-}
+//     box_indices[pidx] = box_index; 
+//     particle_indices_boxed[store_idx] = pidx; 
+// }
