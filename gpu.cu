@@ -195,7 +195,7 @@ int main( int argc, char **argv )
     init_particles( n, particles );
 
     int nsquares = nsquares_per_side*nsquares_per_side;
-    int boxneighbors[nsquares*9];
+    int *boxneighbors = (int* ) malloc(9 * nsquares * sizeof(int));
     get_box_neighbors(nsquares, nsquares_per_side, boxneighbors);
 
     int *box_to_particles = (int* ) malloc(MAX_N_PARTS_PER_BOX * nsquares * sizeof(int));
@@ -353,6 +353,7 @@ int main( int argc, char **argv )
     
     free( particles );
     free(box_to_particles);
+    free(boxneighbors);
     free(box_to_num_particles);
     cudaFree(d_particles);
     cudaFree(d_box_to_particles_odd);
