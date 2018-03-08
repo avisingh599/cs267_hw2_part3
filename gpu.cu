@@ -13,17 +13,6 @@ extern double size;
 //
 //  benchmarking program
 //
-
-__device__ void cudaLock(int *lock) 
-{                                                              
-  while (atomicCAS(lock, 0, 1) != 0);                                                              
-}                                                                                                  
-                                                                                                   
-__device__ void cudaUnlock(int *lock)
-{                                                            
-  atomicExch(lock, 0);                                                                              
-}
-
 inline int get_box_index_serial(
      particle_t* particle,
      double box_width,
@@ -87,12 +76,8 @@ __global__ void compute_forces_grid_gpu(
         int neighboring_box_i = boxneighbors[i_in_boxneighbors];
         if (neighboring_box_i != -1) {
             int num_neigh_parts = box_to_num_particles[neighboring_box_i];
-            // TODO: undo
-            /*particles[tid].ay = -1.;*/
             for (int j = 0; j < num_neigh_parts; j++) {
                 int idx_2 = box_to_particles[MAX_N_PARTS_PER_BOX * neighboring_box_i + j]; 
-        // TODO: undo
-                /*particles[tid].ax = 1.;*/
                 apply_force_gpu(
                     particles[tid],
                     particles[idx_2]
