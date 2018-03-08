@@ -6,6 +6,39 @@
 #include "common.h"
 #include "core.h"
 
+void put_particle_in_box_1(
+     particle_t* particles,
+     int pidx,
+     int* box_positions,
+     double box_width,
+     int nsquares_per_side
+ ) {
+     particle_t *particle = particles + pidx;
+     int box_index = get_box_index_serial(particle,box_width,nsquares_per_side);
+     box_positions[box_index+1] +=1;
+ }
+
+
+ void put_particle_in_box_2(
+     particle_t* particles,
+     int pidx,
+     int* box_positions,
+     int* box_iterators,
+     int* box_indices,
+     int* particle_indices_boxed,
+     double box_width,
+     int nsquares_per_side
+ ) {
+
+     particle_t *particle = particles + pidx;
+     int box_index = get_box_index_serial(particle,box_width,nsquares_per_side);
+    
+     int store_idx = box_positions[box_index] + box_iterators[box_index]; 
+     box_iterators[box_index] += 1; 
+
+     box_indices[pidx] = box_index; 
+     particle_indices_boxed[store_idx] = pidx; 
+ }
 
 //
 //  benchmarking program

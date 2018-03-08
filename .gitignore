@@ -1,0 +1,4 @@
+*.o
+gpu
+serial
+autograder

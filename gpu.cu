@@ -4,7 +4,7 @@
 #include <math.h>
 #include <cuda.h>
 #include "common.h"
-#include "core.cuh"
+#include "core.h"
 
 #define NUM_THREADS 256
 
@@ -111,7 +111,7 @@ __global__ void set_box_iterators_zero(int* box_iterators, int nsquares)
   box_iterators[tid] = 0;
 }
 
-__global__ void put_particle_in_box_1_gpu(particle_t * particles,
+__global__ void put_particles_in_box_1_gpu(particle_t * particles,
                                         int* box_positions,
                                         double box_width,
                                         int nsquares_per_side,                                         
@@ -130,7 +130,7 @@ __global__ void put_particle_in_box_1_gpu(particle_t * particles,
 
 }
 
-__global__ void put_particle_in_box_2_gpu(particle_t * particles,
+__global__ void put_particles_in_box_2_gpu(particle_t * particles,
                                         int* box_positions,
                                         int* box_iterators,
                                         int* box_indices,
@@ -269,20 +269,18 @@ int main( int argc, char **argv )
     int nsquares_per_side = get_max_nsquares_per_side();
     double box_width = get_box_width(nsquares_per_side);
 
+    init_particles( n, particles );
+
     int nsquares = nsquares_per_side*nsquares_per_side;
     int boxneighbors[nsquares*9];
     get_box_neighbors(nsquares, nsquares_per_side, boxneighbors);
 
-    init_particles( n, particles );
-
-
     int *box_indices = (int* ) malloc(n * sizeof(int)); 
-    int *particle_indices_boxed = (int* ) malloc(n * sizeof(int));
-    int *box_iterators = (int* ) malloc(nsquares * sizeof(int)); 
-    int *box_positions = (int* ) malloc((nsquares + 1) * sizeof(int));
+    int *box_to_particles_odd = (int* ) malloc(20 * nsquares * sizeof(int));
+    int *box_to_particles_even = (int* ) malloc(20 * nsquares * sizeof(int));
+    int *num_particles_in_box_odd = (int* ) malloc(nsquares * sizeof(int)); 
+    int *num_particles_in_box_even = (int* ) malloc(nsquares * sizeof(int)); 
 
-
-    // find the neighbors of each mesh square. squares are labelled from bottom left to top right
 
     // for (int b_idx=0; b_idx < nsquares+1; ++b_idx)
     //     box_positions[b_idx] = 0;
@@ -355,9 +353,9 @@ int main( int argc, char **argv )
 
     set_box_iterators_zero <<< blks_boxes, NUM_THREADS >>> (d_box_iterators, nsquares); 
     set_box_positions_zero <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
-    put_particle_in_box_1_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, box_width, nsquares_per_side, n); 
+    put_particles_in_box_1_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, box_width, nsquares_per_side, n); 
     compute_box_positions <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
-    put_particle_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, box_width, nsquares_per_side, n); 
+    put_particles_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, box_width, nsquares_per_side, n); 
     cudaThreadSynchronize();
 
     for( int step = 0; step < NSTEPS; step++ )
@@ -376,9 +374,9 @@ int main( int argc, char **argv )
 
       set_box_iterators_zero <<< blks_boxes, NUM_THREADS >>> (d_box_iterators, nsquares); 
       set_box_positions_zero <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
-      put_particle_in_box_1_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, box_width, nsquares_per_side, n); 
+      put_particles_in_box_1_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, box_width, nsquares_per_side, n); 
       compute_box_positions <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
-      put_particle_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, box_width, nsquares_per_side, n); 
+      put_particles_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, box_width, nsquares_per_side, n); 
 
         //
         //  save if necessary
