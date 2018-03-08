@@ -6,6 +6,8 @@
 #include "common.h"
 #include "core.h"
 
+#define MAX_N_PARTS_PER_BOX 20
+
 inline int get_box_index(
      particle_t* particle,
      double box_width,
@@ -16,39 +18,6 @@ inline int get_box_index(
      return col + row*nsquares_per_side;
  }
 
-void put_particle_in_box_1(
-     particle_t* particles,
-     int pidx,
-     int* box_positions,
-     double box_width,
-     int nsquares_per_side
- ) {
-     particle_t *particle = particles + pidx;
-     int box_index = get_box_index(particle,box_width,nsquares_per_side);
-     box_positions[box_index+1] +=1;
- }
-
-
- void put_particle_in_box_2(
-     particle_t* particles,
-     int pidx,
-     int* box_positions,
-     int* box_iterators,
-     int* box_indices,
-     int* particle_indices_boxed,
-     double box_width,
-     int nsquares_per_side
- ) {
-
-     particle_t *particle = particles + pidx;
-     int box_index = get_box_index(particle,box_width,nsquares_per_side);
-    
-     int store_idx = box_positions[box_index] + box_iterators[box_index]; 
-     box_iterators[box_index] += 1; 
-
-     box_indices[pidx] = box_index; 
-     particle_indices_boxed[store_idx] = pidx; 
- }
 
 //
 //  benchmarking program
@@ -90,14 +59,10 @@ int main( int argc, char **argv )
     particle_t *particles = (particle_t*) malloc( n * sizeof(particle_t) );
     init_particles( n, particles );
 
-    int *box_indices = (int* ) malloc(n * sizeof(int)); 
-    int *particle_indices_boxed = (int* ) malloc(n * sizeof(int));
-    int *box_iterators = (int* ) malloc(nsquares * sizeof(int)); 
-    int *box_positions = (int* ) malloc((nsquares + 1) * sizeof(int));
-    int *box_to_particles_odd = (int* ) malloc(20 * n * sizeof(int));
-    int *box_to_particles_even = (int* ) malloc(20 * n * sizeof(int));
-    int *box_to_num_particles_even = (int* ) malloc(20 * n * sizeof(int));
-    int *box_to_num_particles_odd = (int* ) malloc(20 * n * sizeof(int));
+    int *box_to_particles_odd = (int* ) malloc(MAX_N_PARTS_PER_BOX * nsquares * sizeof(int));
+    int *box_to_particles_even = (int* ) malloc(MAX_N_PARTS_PER_BOX * nsquares * sizeof(int));
+    int *box_to_num_particles_even = (int* ) malloc(nsquares * sizeof(int));
+    int *box_to_num_particles_odd = (int* ) malloc(nsquares * sizeof(int));
     int *box_to_particles = NULL;
     int *box_to_num_particles = NULL;
     int *box_to_particles_next = NULL;
@@ -106,20 +71,21 @@ int main( int argc, char **argv )
 
     // find the neighbors of each mesh square. squares are labelled from bottom left to top right
 
-    for (int b_idx=0; b_idx < nsquares+1; ++b_idx) {
+    for (int b_idx=0; b_idx < nsquares; b_idx++) {
         box_to_num_particles_odd[b_idx] = 0;
         box_to_num_particles_even[b_idx] = 0;
     }
 
-    for (int p_idx = 0; p_idx < n; ++p_idx) {
+    for (int p_idx = 0; p_idx < n; p_idx++) {
         int box_i = get_box_index(
                 particles + p_idx,
                 box_width,
                 nsquares_per_side
             );
-        box_to_particles_odd[box_i] = p_idx;
+        int n_parts = box_to_num_particles_even[box_i];
+        box_to_particles_odd[MAX_N_PARTS_PER_BOX * box_i + n_parts] = p_idx;
         box_to_num_particles_odd[box_i]++;
-        box_to_particles_even[box_i] = p_idx;
+        box_to_particles_even[MAX_N_PARTS_PER_BOX * box_i + n_parts] = p_idx;
         box_to_num_particles_even[box_i]++;
     }
 
@@ -149,8 +115,8 @@ int main( int argc, char **argv )
         //
         for (int i = 0; i < n; i++ )
         {
+            int box_i = get_box_index(particles + i, box_width, nsquares_per_side);
             particles[i].ax = particles[i].ay = 0;
-            int box_i = box_indices[i];
             for (
                 int i_in_boxneighbors = box_i * 9;
                 i_in_boxneighbors < (box_i+1)*9;
@@ -159,8 +125,8 @@ int main( int argc, char **argv )
                 int neighboring_box_i = boxneighbors[i_in_boxneighbors];
                 if (neighboring_box_i != -1) {
                     int num_neigh_parts = box_to_num_particles[neighboring_box_i];
-                    for (int j = 0; j < num_neigh_parts; j++) {     
-                        int idx_2 = box_to_particles[j]; 
+                    for (int j = 0; j < num_neigh_parts; j++) {
+                        int idx_2 = box_to_particles[MAX_N_PARTS_PER_BOX * neighboring_box_i + j]; 
                         apply_force(
                             particles[i],
                             particles[idx_2]
@@ -182,28 +148,30 @@ int main( int argc, char **argv )
         //  rebin
         //
         for (int box_i=0; box_i < nsquares; box_i++) {
-            box_to_num_particles_next[box_i] = 0;
+            int new_num_parts = 0;
             for (
                 int i_in_boxneighbors = box_i * 9;
                 i_in_boxneighbors < (box_i+1)*9;
                 i_in_boxneighbors++
             ) {
-                if (boxneighbors[i_in_boxneighbors] != -1) {
-                    int num_parts = box_to_num_particles[box_i];
-                    for (int j = 0; j < num_parts; j++) {     
-                        int part_i = box_to_particles[j]; 
+                int neighboring_box_i = boxneighbors[i_in_boxneighbors];
+                if (neighboring_box_i != -1) {
+                    int num_parts_neighbor = box_to_num_particles[neighboring_box_i];
+                    for (int j = 0; j < num_parts_neighbor; j++) {
+                        int part_i = box_to_particles[MAX_N_PARTS_PER_BOX * neighboring_box_i + j];
                         int new_box_i = get_box_index(
                              particles + part_i,
                              box_width,
-                             nsquares
+                             nsquares_per_side
                          );
                         if (new_box_i == box_i) {
-                            box_to_particles_next[box_i] = part_i;
-                            box_to_num_particles_next[box_i]++;
+                            box_to_particles_next[MAX_N_PARTS_PER_BOX * box_i + new_num_parts] = part_i;
+                            new_num_parts++;
                         }
                     }
                 }
             }
+            box_to_num_particles_next[box_i] = new_num_parts;
         }
 
         if( find_option( argc, argv, "-no" ) == -1 )
