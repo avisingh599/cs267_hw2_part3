@@ -10,31 +10,4 @@ void bin_particles(particle_t* particledata, int* nparticles_per_bin, int* bin_c
 double get_box_width(int nsquares_per_side);
 int get_max_nsquares_per_side();
 
-void put_particle_in_box_1(
-    particle_t* particles,
-    int pidx,
-    int* box_positions,
-    double box_width,
-    int nsquares_per_side
-); 
-
-void put_particle_in_box_2(
-    particle_t* particles,
-    int pidx,
-    int* box_positions,
-    int* box_iterators,
-    int* box_indices,
-    int* particle_indices_boxed,
-    double box_width,
-    int nsquares_per_side
-);
-
-
-int get_box_index(
-    particle_t* particle,
-    double box_width,
-    int nsquares_per_side
-);
-
-
 #endif

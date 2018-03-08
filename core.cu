@@ -7,7 +7,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include "common.h"
-#include "core.cuh"
+#include "core.h"
 
 //#include "core_openmp.h"
 

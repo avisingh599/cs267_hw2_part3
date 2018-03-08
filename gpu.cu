@@ -4,7 +4,7 @@
 #include <math.h>
 #include <cuda.h>
 #include "common.h"
-#include "core.cuh"
+#include "core.h"
 
 #define NUM_THREADS 256
 
