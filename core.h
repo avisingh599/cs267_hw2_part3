@@ -7,11 +7,6 @@ void bin_particles(particle_t* particledata, int* nparticles_per_bin, int* bin_c
 
 double get_box_width(int nsquares_per_side);
 int get_max_nsquares_per_side();
-int get_box_index_serial(
-    particle_t* particle,
-    double box_width,
-    int nsquares_per_side
-);
 
 
 #endif

@@ -280,6 +280,9 @@ int main( int argc, char **argv )
     int *box_to_particles_even = (int* ) malloc(20 * nsquares * sizeof(int));
     int *num_particles_in_box_odd = (int* ) malloc(nsquares * sizeof(int)); 
     int *num_particles_in_box_even = (int* ) malloc(nsquares * sizeof(int)); 
+    int *particle_indices_boxed = (int* ) malloc(nsquares * sizeof(int)); 
+    int *box_iterators = (int* ) malloc(nsquares * sizeof(int)); 
+    int *box_positions = (int* ) malloc(nsquares * sizeof(int)); 
 
 
     // for (int b_idx=0; b_idx < nsquares+1; ++b_idx)

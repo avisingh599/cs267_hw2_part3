@@ -6,6 +6,16 @@
 #include "common.h"
 #include "core.h"
 
+inline int get_box_index(
+     particle_t* particle,
+     double box_width,
+     int nsquares_per_side
+ ) {
+     int row = floor(particle->y/box_width);
+     int col = floor(particle->x/box_width);
+     return col + row*nsquares_per_side;
+ }
+
 void put_particle_in_box_1(
      particle_t* particles,
      int pidx,
@@ -14,7 +24,7 @@ void put_particle_in_box_1(
      int nsquares_per_side
  ) {
      particle_t *particle = particles + pidx;
-     int box_index = get_box_index_serial(particle,box_width,nsquares_per_side);
+     int box_index = get_box_index(particle,box_width,nsquares_per_side);
      box_positions[box_index+1] +=1;
  }
 
@@ -31,7 +41,7 @@ void put_particle_in_box_1(
  ) {
 
      particle_t *particle = particles + pidx;
-     int box_index = get_box_index_serial(particle,box_width,nsquares_per_side);
+     int box_index = get_box_index(particle,box_width,nsquares_per_side);
     
      int store_idx = box_positions[box_index] + box_iterators[box_index]; 
      box_iterators[box_index] += 1; 
@@ -84,39 +94,34 @@ int main( int argc, char **argv )
     int *particle_indices_boxed = (int* ) malloc(n * sizeof(int));
     int *box_iterators = (int* ) malloc(nsquares * sizeof(int)); 
     int *box_positions = (int* ) malloc((nsquares + 1) * sizeof(int));
+    int *box_to_particles_odd = (int* ) malloc(20 * n * sizeof(int));
+    int *box_to_particles_even = (int* ) malloc(20 * n * sizeof(int));
+    int *box_to_num_particles_even = (int* ) malloc(20 * n * sizeof(int));
+    int *box_to_num_particles_odd = (int* ) malloc(20 * n * sizeof(int));
+    int *box_to_particles = NULL;
+    int *box_to_num_particles = NULL;
+    int *box_to_particles_next = NULL;
+    int *box_to_num_particles_next = NULL;
 
 
     // find the neighbors of each mesh square. squares are labelled from bottom left to top right
 
-    for (int b_idx=0; b_idx < nsquares+1; ++b_idx)
-        box_positions[b_idx] = 0;
+    for (int b_idx=0; b_idx < nsquares+1; ++b_idx) {
+        box_to_num_particles_odd[b_idx] = 0;
+        box_to_num_particles_even[b_idx] = 0;
+    }
 
-    for (int b_idx=0; b_idx < nsquares; ++b_idx)
-        box_iterators[b_idx] = 0;
-
-    for (int p_idx = 0; p_idx < n; ++p_idx)
-        put_particle_in_box_1(
-            particles,
-            p_idx,
-            box_positions,
-            box_width,
-            nsquares_per_side
+    for (int p_idx = 0; p_idx < n; ++p_idx) {
+        int box_i = get_box_index(
+                particles + p_idx,
+                box_width,
+                nsquares_per_side
             );
-
-    for (int b_idx=1; b_idx < nsquares+1; ++b_idx)
-        box_positions[b_idx] = box_positions[b_idx] + box_positions[b_idx-1];
-
-    for (int p_idx = 0; p_idx < n; ++p_idx)
-        put_particle_in_box_2(
-            particles,
-            p_idx,
-            box_positions,
-            box_iterators,
-            box_indices,
-            particle_indices_boxed,
-            box_width,
-            nsquares_per_side
-            );
+        box_to_particles_odd[box_i] = p_idx;
+        box_to_num_particles_odd[box_i]++;
+        box_to_particles_even[box_i] = p_idx;
+        box_to_num_particles_even[box_i]++;
+    }
 
     //
     //  simulate a number of time steps
@@ -128,36 +133,42 @@ int main( int argc, char **argv )
         // navg = 0;
         // davg = 0.0;
         // dmin = 1.0;
+        if (step % 2 == 0) {
+            box_to_particles = box_to_particles_even;
+            box_to_num_particles = box_to_num_particles_even;
+            box_to_particles_next = box_to_particles_odd;
+            box_to_num_particles_next = box_to_num_particles_odd;
+        } else {
+            box_to_particles = box_to_particles_odd;
+            box_to_num_particles = box_to_num_particles_odd;
+            box_to_particles_next = box_to_particles_even;
+            box_to_num_particles_next = box_to_num_particles_even;
+        }
         //
         //  compute forces
         //
         for (int i = 0; i < n; i++ )
         {
             particles[i].ax = particles[i].ay = 0;
-            int box_idx = box_indices[i];
-            //Box* box = boxes[box_idx];
+            int box_i = box_indices[i];
             for (
-                int i_in_boxneighbors = box_idx * 9;
-                i_in_boxneighbors < (box_idx+1)*9;
+                int i_in_boxneighbors = box_i * 9;
+                i_in_boxneighbors < (box_i+1)*9;
                 i_in_boxneighbors++
             ) {
                 int neighboring_box_i = boxneighbors[i_in_boxneighbors];
                 if (neighboring_box_i != -1) {
-
-                    for (
-                        int it = box_positions[neighboring_box_i];
-                        it != box_positions[neighboring_box_i+1];
-                        it++
-                    ) {     
-                        int idx_2 = particle_indices_boxed[it]; 
-                            apply_force(
-                                particles[i],
-                                particles[idx_2]
-                            );
-                     }
+                    int num_neigh_parts = box_to_num_particles[neighboring_box_i];
+                    for (int j = 0; j < num_neigh_parts; j++) {     
+                        int idx_2 = box_to_particles[j]; 
+                        apply_force(
+                            particles[i],
+                            particles[idx_2]
+                        );
                     }
                 }
             }
+        }
 
 
         //
@@ -167,37 +178,33 @@ int main( int argc, char **argv )
             move( particles[i] );
 
 
-        for (int b_idx=0; b_idx < nsquares+1; ++b_idx)
-            box_positions[b_idx] = 0;
-
-        for (int b_idx=0; b_idx < nsquares; ++b_idx)
-            box_iterators[b_idx] = 0;
-
-        for (int p_idx = 0; p_idx < n; ++p_idx)
-            put_particle_in_box_1(
-                particles,
-                p_idx,
-                box_positions,
-                box_width,
-                nsquares_per_side
-                );
-
-        for (int b_idx=1; b_idx < nsquares+1; ++b_idx)
-            box_positions[b_idx] = box_positions[b_idx] + box_positions[b_idx-1];
-
-        for (int p_idx = 0; p_idx < n; ++p_idx)
-            put_particle_in_box_2(
-                particles,
-                p_idx,
-                box_positions,
-                box_iterators,
-                box_indices,
-                particle_indices_boxed,
-                box_width,
-                nsquares_per_side
-                );
-
-
+        //
+        //  rebin
+        //
+        for (int box_i=0; box_i < nsquares; box_i++) {
+            box_to_num_particles_next[box_i] = 0;
+            for (
+                int i_in_boxneighbors = box_i * 9;
+                i_in_boxneighbors < (box_i+1)*9;
+                i_in_boxneighbors++
+            ) {
+                if (boxneighbors[i_in_boxneighbors] != -1) {
+                    int num_parts = box_to_num_particles[box_i];
+                    for (int j = 0; j < num_parts; j++) {     
+                        int part_i = box_to_particles[j]; 
+                        int new_box_i = get_box_index(
+                             particles + part_i,
+                             box_width,
+                             nsquares
+                         );
+                        if (new_box_i == box_i) {
+                            box_to_particles_next[box_i] = part_i;
+                            box_to_num_particles_next[box_i]++;
+                        }
+                    }
+                }
+            }
+        }
 
         if( find_option( argc, argv, "-no" ) == -1 )
         {

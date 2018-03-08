@@ -90,13 +90,3 @@ void bin_particles(particle_t* particledata, int* nparticles_per_bin, int* bin_c
 int get_max_nsquares_per_side() {
     return floor(size / cutoff);
 }
-
-int get_box_index_serial(
-     particle_t* particle,
-     double box_width,
-     int nsquares_per_side
- ) {
-     int row = floor(particle->y/box_width);
-     int col = floor(particle->x/box_width);
-     return col + row*nsquares_per_side;
- }
