@@ -42,7 +42,9 @@ __device__ void put_particle_in_box_1(
 ) {
     particle_t *particle = particles + pidx;
     int box_index = get_box_index(particle,box_width,nsquares_per_side);
-    box_positions[box_index+1] +=1;
+    //box_positions[box_index+1] +=1;
+    int* add = box_positions + box_index + 1;
+    atomicAdd(add,1);
 }
 
 
@@ -53,17 +55,23 @@ __device__ void put_particle_in_box_2(
     int* box_iterators,
     int* box_indices,
     int* particle_indices_boxed,
+    int *locks,
     double box_width,
     int nsquares_per_side
 ) {
 
     particle_t *particle = particles + pidx;
     int box_index = get_box_index(particle,box_width,nsquares_per_side);
-    
-    int store_idx = box_positions[box_index] + box_iterators[box_index]; 
-    box_iterators[box_index] += 1; 
-
     box_indices[pidx] = box_index; 
+
+    cudaLock(locks + box_index);
+    int store_idx = box_positions[box_index] + box_iterators[box_index]; 
+    
+    //int* add = box_iterators + box_index; 
+    //atomicAdd(add, 1);
+    box_iterators[box_index] += 1; 
+    cudaUnlock(locks + box_index);
+    
     particle_indices_boxed[store_idx] = pidx; 
 }
 
@@ -135,6 +143,7 @@ __global__ void put_particle_in_box_2_gpu(particle_t * particles,
                                         int* box_iterators,
                                         int* box_indices,
                                         int* particle_indices_boxed,
+                                        int* locks,
                                         double box_width, 
                                         int nsquares_per_side,                                         
                                         int n)
@@ -149,6 +158,7 @@ __global__ void put_particle_in_box_2_gpu(particle_t * particles,
       box_iterators,
       box_indices,
       particle_indices_boxed,
+      locks,
       box_width,
       nsquares_per_side
       );
@@ -348,6 +358,11 @@ int main( int argc, char **argv )
     cudaMemcpy(d_box_positions, box_positions, (nsquares+1) * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_boxneighbors, boxneighbors, (nsquares*9) * sizeof(int), cudaMemcpyHostToDevice);
 
+  
+    int *d_locks; 
+    cudaMalloc((void **) &d_locks, nsquares * sizeof(int));
+    cudaMemset(d_locks, 0, nsquares * sizeof(int));
+
     cudaThreadSynchronize();
     int blks_particles = (n + NUM_THREADS - 1) / NUM_THREADS;
     int blks_boxes = (nsquares + 1 + NUM_THREADS - 1) / NUM_THREADS;
@@ -357,7 +372,7 @@ int main( int argc, char **argv )
     set_box_positions_zero <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
     put_particle_in_box_1_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, box_width, nsquares_per_side, n); 
     compute_box_positions <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
-    put_particle_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, box_width, nsquares_per_side, n); 
+    put_particle_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, d_locks, box_width, nsquares_per_side, n); 
     cudaThreadSynchronize();
 
     for( int step = 0; step < NSTEPS; step++ )
@@ -378,7 +393,7 @@ int main( int argc, char **argv )
       set_box_positions_zero <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
       put_particle_in_box_1_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, box_width, nsquares_per_side, n); 
       compute_box_positions <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
-      put_particle_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, box_width, nsquares_per_side, n); 
+      put_particle_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, d_locks, box_width, nsquares_per_side, n); 
 
         //
         //  save if necessary
@@ -387,11 +402,14 @@ int main( int argc, char **argv )
 	    // Copy the particles back to the CPU
             cudaMemcpy(particles, d_particles, n * sizeof(particle_t), cudaMemcpyDeviceToHost);
             save( fsave, n, particles);
-	}
+	      }
     }
     cudaThreadSynchronize();
     simulation_time = read_timer( ) - simulation_time;
-    
+
+    cudaMemcpy(box_iterators, d_box_iterators, nsquares * sizeof(particle_t), cudaMemcpyDeviceToHost);
+
+    printf("DEBUG: %d %d %d \n", box_iterators[0], box_iterators[1], box_iterators[2]);
     printf( "CPU-GPU copy time = %g seconds\n", copy_time);
     printf( "n = %d, simulation time = %g seconds\n", n, simulation_time );
     
