@@ -33,48 +33,6 @@ __device__ int get_box_index(
     return col + row*nsquares_per_side;
 }
 
-__device__ void put_particle_in_box_1(
-    particle_t* particles,
-    int pidx,
-    int* box_positions,
-    double box_width,
-    int nsquares_per_side
-) {
-    particle_t *particle = particles + pidx;
-    int box_index = get_box_index(particle,box_width,nsquares_per_side);
-    //box_positions[box_index+1] +=1;
-    int* add = box_positions + box_index + 1;
-    atomicAdd(add,1);
-}
-
-
-__device__ void put_particle_in_box_2(
-    particle_t* particles,
-    int pidx,
-    int* box_positions,
-    int* box_iterators,
-    int* box_indices,
-    int* particle_indices_boxed,
-    int *locks,
-    double box_width,
-    int nsquares_per_side
-) {
-
-    particle_t *particle = particles + pidx;
-    int box_index = get_box_index(particle,box_width,nsquares_per_side);
-    box_indices[pidx] = box_index; 
-
-    cudaLock(locks + box_index);
-    int store_idx = box_positions[box_index] + box_iterators[box_index]; 
-    
-    //int* add = box_iterators + box_index; 
-    //atomicAdd(add, 1);
-    box_iterators[box_index] += 1; 
-    cudaUnlock(locks + box_index);
-    
-    particle_indices_boxed[store_idx] = pidx; 
-}
-
 __device__ void apply_force_gpu(particle_t &particle, particle_t &neighbor)
 {
   double dx = neighbor.x - particle.x;
@@ -96,27 +54,45 @@ __device__ void apply_force_gpu(particle_t &particle, particle_t &neighbor)
 }
 
 __global__ void set_box_positions_zero(int* box_positions, int nsquares)
-{
+{ 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if(tid >= (nsquares+1)) return;
 
   box_positions[tid] = 0;
+
+  //printf("box pos set %d: %d\n", tid, box_positions[tid]);
+
 }
 
 __global__ void compute_box_positions(int* box_positions, int nsquares)
-{
+{ 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if(tid >= (nsquares +1) || tid < 1) return;
-
+  ///TODO BUG!! alternate, have some global "ticker"? 
   box_positions[tid] = box_positions[tid] + box_positions[tid-1];
 }
 
+__global__ void compute_box_positions_serial(int* box_positions, int nsquares)
+{ 
+  //int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  //if(tid >= (nsquares +1) || tid < 1) return;
+  ///TODO BUG!! alternate, have some global "ticker"? 
+  
+  for (int i=1; i<nsquares+1; i++) {
+  box_positions[i] = box_positions[i] + box_positions[i-1];
+  //printf("box pos %d: %d\n", i, box_positions[i]);
+  }
+}
+
 __global__ void set_box_iterators_zero(int* box_iterators, int nsquares)
-{
+{  
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if(tid >= nsquares) return;
 
   box_iterators[tid] = 0;
+
+  //printf("box itr set %d: %d\n", tid, box_iterators[tid]);
+
 }
 
 __global__ void put_particle_in_box_1_gpu(particle_t * particles,
@@ -128,13 +104,15 @@ __global__ void put_particle_in_box_1_gpu(particle_t * particles,
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if(tid >= n) return;
 
-  put_particle_in_box_1(
-            particles,
-            tid,
-            box_positions,
-            box_width,
-            nsquares_per_side
-            );
+  particle_t *particle = particles + tid;
+  int box_index = get_box_index(particle,box_width,nsquares_per_side);
+  //printf("tid: %d box index: %d\n", pidx, box_index);
+  //box_positions[box_index+1] +=1;
+  //int* add = box_positions + box_index + 1;
+  //printf("tid: %d box position before: %d\n", pidx, box_positions[box_index+1]);
+  //atomicAdd(add,1);
+  atomicAdd(box_positions + box_index + 1,1);
+  //printf("tid: %d box position after: %d\n", pidx, box_positions[box_index+1]);
 
 }
 
@@ -151,17 +129,22 @@ __global__ void put_particle_in_box_2_gpu(particle_t * particles,
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if(tid >= n) return;
 
-  put_particle_in_box_2(
-      particles,
-      tid,
-      box_positions,
-      box_iterators,
-      box_indices,
-      particle_indices_boxed,
-      locks,
-      box_width,
-      nsquares_per_side
-      );
+  particle_t *particle = particles + tid;
+  int box_index = get_box_index(particle,box_width,nsquares_per_side);
+  box_indices[tid] = box_index; 
+
+  cudaLock(locks + box_index);
+  int store_idx = box_positions[box_index] + box_iterators[box_index]; 
+  
+  //printf("store idx: %d\n", store_idx);
+  //int* add = box_iterators + box_index; 
+  //atomicAdd(add, 1);
+  box_iterators[box_index] += 1;
+  cudaUnlock(locks + box_index);
+  
+  particle_indices_boxed[store_idx] = tid; 
+
+
 }
 
 __global__ void compute_forces_grid_gpu(particle_t * particles,
@@ -176,6 +159,7 @@ __global__ void compute_forces_grid_gpu(particle_t * particles,
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if(tid >= n) return;
 
+
   particles[tid].ax = particles[tid].ay = 0;
   int box_idx = box_indices[tid];
 
@@ -189,7 +173,7 @@ __global__ void compute_forces_grid_gpu(particle_t * particles,
 
           for (
               int it = box_positions[neighboring_box_i];
-              it != box_positions[neighboring_box_i+1];
+              it < box_positions[neighboring_box_i+1];
               it++
           ) {     
               int idx_2 = particle_indices_boxed[it]; 
@@ -217,7 +201,6 @@ __global__ void compute_forces_gpu(particle_t * particles, int n)
 
 __global__ void move_gpu (particle_t * particles, int n, double size)
 {
-
   // Get thread (particle) ID
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if(tid >= n) return;
@@ -280,7 +263,8 @@ int main( int argc, char **argv )
     double box_width = get_box_width(nsquares_per_side);
 
     int nsquares = nsquares_per_side*nsquares_per_side;
-    int boxneighbors[nsquares*9];
+    //int boxneighbors[nsquares*9];
+    int* boxneighbors = (int* ) malloc((nsquares*9) * sizeof(int)); 
     get_box_neighbors(nsquares, nsquares_per_side, boxneighbors);
 
     init_particles( n, particles );
@@ -352,11 +336,11 @@ int main( int argc, char **argv )
     cudaMalloc((void **) &d_box_positions, (nsquares+1) * sizeof(int));
     cudaMalloc((void **) &d_boxneighbors, (nsquares*9) * sizeof(int));
 
-    cudaMemcpy(d_box_indices, box_indices, n * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_particle_indices_boxed, particle_indices_boxed, n * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_box_iterators, box_iterators, nsquares * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_box_positions, box_positions, (nsquares+1) * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_boxneighbors, boxneighbors, (nsquares*9) * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_box_indices, box_indices, n * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_particle_indices_boxed, particle_indices_boxed, n * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_box_iterators, box_iterators, nsquares * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_box_positions, box_positions, (nsquares+1) * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_boxneighbors, boxneighbors, (nsquares*9) * sizeof(int), cudaMemcpyHostToDevice);
 
   
     int *d_locks; 
@@ -371,10 +355,23 @@ int main( int argc, char **argv )
     set_box_iterators_zero <<< blks_boxes, NUM_THREADS >>> (d_box_iterators, nsquares); 
     set_box_positions_zero <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
     put_particle_in_box_1_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, box_width, nsquares_per_side, n); 
-    compute_box_positions <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
+    
+    //compute_box_positions <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
+    compute_box_positions_serial <<<1,1>>> (d_box_positions, nsquares);
+    
     put_particle_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, d_locks, box_width, nsquares_per_side, n); 
     cudaThreadSynchronize();
 
+
+    // cudaMemcpy(box_positions, d_box_positions, (nsquares +1) * sizeof(int), cudaMemcpyDeviceToHost);
+    // printf("DEBUG box positions: %d %d %d \n", box_positions[0], box_positions[10], box_positions[20]);
+    
+    // cudaMemcpy(box_iterators, d_box_iterators, nsquares * sizeof(int), cudaMemcpyDeviceToHost);
+    // printf("DEBUG box iterators: %d %d %d \n", box_iterators[0], box_iterators[10], box_iterators[20]);
+
+    // cudaMemcpy(particle_indices_boxed, d_particle_indices_boxed, n * sizeof(int), cudaMemcpyDeviceToHost);
+    // printf("DEBUG particle indices: %d %d %d \n", box_iterators[0], box_iterators[10], box_iterators[20]);
+    
     for( int step = 0; step < NSTEPS; step++ )
     {
         //
@@ -384,7 +381,10 @@ int main( int argc, char **argv )
 	    //compute_forces_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, n);
       compute_forces_grid_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_boxneighbors, d_particle_indices_boxed, d_box_indices, n);
 
-        //
+      // cudaError_t err = cudaGetLastError();
+      // if (err != cudaSuccess) 
+      //   printf("Error: %s\n", cudaGetErrorString(err));
+      //   //
         //  move particles
         //
 	    move_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, n, size);
@@ -392,7 +392,8 @@ int main( int argc, char **argv )
       set_box_iterators_zero <<< blks_boxes, NUM_THREADS >>> (d_box_iterators, nsquares); 
       set_box_positions_zero <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
       put_particle_in_box_1_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, box_width, nsquares_per_side, n); 
-      compute_box_positions <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
+//    compute_box_positions <<< blks_boxes, NUM_THREADS >>> (d_box_positions, nsquares);
+      compute_box_positions_serial <<<1,1>>> (d_box_positions, nsquares);
       put_particle_in_box_2_gpu <<< blks_particles, NUM_THREADS >>> (d_particles, d_box_positions, d_box_iterators, d_box_indices, d_particle_indices_boxed, d_locks, box_width, nsquares_per_side, n); 
 
         //
@@ -407,9 +408,9 @@ int main( int argc, char **argv )
     cudaThreadSynchronize();
     simulation_time = read_timer( ) - simulation_time;
 
-    cudaMemcpy(box_iterators, d_box_iterators, nsquares * sizeof(particle_t), cudaMemcpyDeviceToHost);
-
-    printf("DEBUG: %d %d %d \n", box_iterators[0], box_iterators[1], box_iterators[2]);
+    cudaMemcpy(box_positions, d_box_positions, (nsquares +1) * sizeof(int), cudaMemcpyDeviceToHost);
+    printf("DEBUG box positions: %d %d %d \n", box_positions[0], box_positions[10], box_positions[20]);
+    
     printf( "CPU-GPU copy time = %g seconds\n", copy_time);
     printf( "n = %d, simulation time = %g seconds\n", n, simulation_time );
     
