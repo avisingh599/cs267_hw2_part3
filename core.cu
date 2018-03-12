@@ -43,5 +43,6 @@ void get_box_neighbors(int nsquares, int nsquares_per_side, int* boxneighbors)
 }
 
 int get_max_nsquares_per_side() {
-    return floor(size / cutoff);
+    int nominal = floor(size / cutoff);
+    return nominal;
 }

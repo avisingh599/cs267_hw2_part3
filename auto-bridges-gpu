@@ -4,16 +4,16 @@
 #SBATCH -o auto-particle-gpu.stdout
 #SBATCH -p GPU-shared
 #SBATCH --gres=gpu:k80:1
-#SBATCH -t 00:10:00
+#SBATCH -t 00:20:00
 #SBATCH -N 1         
 
-./gpu -n 500 
-./gpu -n 1000 
-./gpu -n 2000 
-./gpu -n 4000 
-./gpu -n 8000 
-./serial -n 500 
-./serial -n 1000 
-./serial -n 2000 
-./serial -n 4000 
-./serial -n 8000  
+./gpu -n 50000 
+./gpu -n 100000 
+./gpu -n 200000 
+./gpu -n 400000 
+./gpu -n 800000 
+./serial -n 50000 
+./serial -n 100000 
+./serial -n 200000 
+./serial -n 400000 
+./serial -n 800000  
